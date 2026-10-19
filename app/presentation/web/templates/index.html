@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Распознавание документов</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #1c1915;
+      --muted: #5c564c;
+      --line: #d9d2c5;
+      --paper: #f7f4ee;
+      --card: #fffdf9;
+      --accent: #0f6e56;
+      --accent-ink: #ffffff;
+      --danger: #8f2d2d;
+      --danger-bg: #f8ecec;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--paper);
+    }
+    main {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 32px 20px 64px;
+    }
+    h1 { font-size: 1.7rem; font-weight: 650; margin: 0 0 8px; }
+    h2 { font-size: 1.05rem; margin: 0 0 12px; }
+    p { color: var(--muted); margin: 0 0 20px; }
+    section {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    label { display: block; font-size: 0.92rem; margin-bottom: 6px; }
+    input[type="text"], input[type="file"], select, textarea {
+      width: 100%;
+      font: inherit;
+      color: inherit;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px 10px;
+    }
+    textarea { min-height: 160px; resize: vertical; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    button {
+      font: inherit;
+      border: 0;
+      border-radius: 8px;
+      padding: 9px 14px;
+      background: var(--accent);
+      color: var(--accent-ink);
+      cursor: pointer;
+    }
+    button.secondary { background: #efeae2; color: var(--ink); }
+    button:disabled { opacity: 0.6; cursor: wait; }
+    .error {
+      display: none;
+      background: var(--danger-bg);
+      color: var(--danger);
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 16px;
+      white-space: pre-wrap;
+    }
+    pre {
+      margin: 0;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: Consolas, monospace;
+      font-size: 0.86rem;
+    }
+    .hint { font-size: 0.85rem; color: var(--muted); margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Распознавание документов</h1>
+    <p>PDF, Excel, JPEG или WebP уходят в GigaChat по выбранной схеме. Счёт на оплату уже встроен, свою схему можно сохранить.</p>
+    <div id="error" class="error"></div>
+
+    <section>
+      <h2>Документ</h2>
+      <label for="file">Файл</label>
+      <input id="file" type="file" accept=".pdf,.xlsx,.xls,.jpg,.jpeg,.webp">
+      <p class="hint">JPEG уходит как изображение и распознаётся моделью GigaChat-2-Max. PDF и остальные форматы идут в GigaChat-2.</p>
+      <label for="schema" style="margin-top: 12px">Схема</label>
+      <select id="schema"></select>
+      <p class="hint" id="schema-kind"></p>
+      <div class="row">
+        <button id="recognize" type="button">Распознать</button>
+        <button id="remove-schema" class="secondary" type="button">Удалить схему</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Своя схема</h2>
+      <label for="schema-name">Имя</label>
+      <input id="schema-name" type="text" maxlength="120" placeholder="Например, УПД">
+      <label for="schema-prompt" style="margin-top: 12px">Текст схемы</label>
+      <textarea id="schema-prompt" placeholder="Инструкция модели и JSON-схема"></textarea>
+      <div class="row">
+        <button id="save-schema" class="secondary" type="button">Сохранить схему</button>
+        <button id="recognize-prompt" type="button">Распознать этим текстом</button>
+      </div>
+      <p class="hint">«Распознать этим текстом» не записывает схему. Чтобы пользоваться ей снова, нажмите «Сохранить схему».</p>
+    </section>
+
+    <section>
+      <h2>Результат</h2>
+      <pre id="result">Здесь появится JSON.</pre>
+    </section>
+  </main>
+  <script>
+    const errorBox = document.getElementById("error");
+    const schemaSelect = document.getElementById("schema");
+    const resultBox = document.getElementById("result");
+    let schemas = [];
+
+    function showError(message) {
+      errorBox.style.display = message ? "block" : "none";
+      errorBox.textContent = message || "";
+    }
+
+    async function readError(response) {
+      try {
+        const body = await response.json();
+        if (typeof body.detail === "string") {
+          return body.detail;
+        }
+        return body.detail ? JSON.stringify(body.detail) : response.statusText;
+      } catch (_err) {
+        return response.statusText;
+      }
+    }
+
+    function selectedSchema() {
+      return schemas.find((item) => item.id === schemaSelect.value) || null;
+    }
+
+    function renderSchemas(preferredId) {
+      schemaSelect.innerHTML = "";
+      schemas.forEach((item) => {
+        const option = document.createElement("option");
+        option.value = item.id;
+        option.textContent = item.builtin ? item.name + " (встроенная)" : item.name;
+        schemaSelect.appendChild(option);
+      });
+      if (preferredId && schemas.some((item) => item.id === preferredId)) {
+        schemaSelect.value = preferredId;
+      }
+      const current = selectedSchema();
+      document.getElementById("schema-kind").textContent = current
+        ? (current.builtin ? "Встроенную схему удалить нельзя." : "Пользовательская схема.")
+        : "";
+      document.getElementById("remove-schema").disabled = !current || current.builtin;
+    }
+
+    async function loadSchemas(preferredId) {
+      const response = await fetch("/api/schemas");
+      if (!response.ok) {
+        showError(await readError(response));
+        return;
+      }
+      schemas = await response.json();
+      renderSchemas(preferredId);
+    }
+
+    async function recognize(form) {
+      showError("");
+      resultBox.textContent = "Распознавание…";
+      const buttons = document.querySelectorAll("button");
+      buttons.forEach((button) => { button.disabled = true; });
+      try {
+        const response = await fetch("/api/recognize", { method: "POST", body: form });
+        if (!response.ok) {
+          resultBox.textContent = "Здесь появится JSON.";
+          showError(await readError(response));
+          return;
+        }
+        const body = await response.json();
+        resultBox.textContent = body.model + "\n\n" + JSON.stringify(body.data, null, 2);
+      } catch (_err) {
+        resultBox.textContent = "Здесь появится JSON.";
+        showError("Не удалось связаться с сервером.");
+      } finally {
+        buttons.forEach((button) => { button.disabled = false; });
+        renderSchemas(schemaSelect.value);
+      }
+    }
+
+    document.getElementById("schema").addEventListener("change", () => renderSchemas(schemaSelect.value));
+
+    document.getElementById("recognize").addEventListener("click", () => {
+      const file = document.getElementById("file").files[0];
+      if (!file) {
+        showError("Выберите файл.");
+        return;
+      }
+      const form = new FormData();
+      form.append("file", file);
+      form.append("schema_id", schemaSelect.value);
+      recognize(form);
+    });
+
+    document.getElementById("recognize-prompt").addEventListener("click", () => {
+      const file = document.getElementById("file").files[0];
+      const prompt = document.getElementById("schema-prompt").value.trim();
+      if (!file) {
+        showError("Выберите файл.");
+        return;
+      }
+      if (!prompt) {
+        showError("Введите текст схемы.");
+        return;
+      }
+      const form = new FormData();
+      form.append("file", file);
+      form.append("prompt", prompt);
+      recognize(form);
+    });
+
+    document.getElementById("save-schema").addEventListener("click", async () => {
+      showError("");
+      const name = document.getElementById("schema-name").value.trim();
+      const prompt = document.getElementById("schema-prompt").value.trim();
+      const response = await fetch("/api/schemas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, prompt }),
+      });
+      if (!response.ok) {
+        showError(await readError(response));
+        return;
+      }
+      const saved = await response.json();
+      await loadSchemas(saved.id);
+    });
+
+    document.getElementById("remove-schema").addEventListener("click", async () => {
+      const current = selectedSchema();
+      if (!current || current.builtin) {
+        return;
+      }
+      showError("");
+      const response = await fetch("/api/schemas/" + encodeURIComponent(current.id), { method: "DELETE" });
+      if (!response.ok) {
+        showError(await readError(response));
+        return;
+      }
+      await loadSchemas("invoice");
+    });
+
+    loadSchemas("invoice");
+  </script>
+</body>
+</html>
