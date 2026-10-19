@@ -89,6 +89,16 @@
     <div id="error" class="error"></div>
 
     <section>
+      <h2>Доступ</h2>
+      <label for="token">Ключ</label>
+      <input id="token" type="password" autocomplete="off" spellcheck="false">
+      <div class="row">
+        <button id="save-token" class="secondary" type="button">Сохранить ключ в этой вкладке</button>
+      </div>
+      <p class="hint">Ключ берётся из APP_TOKEN в файле .env и не сохраняется после закрытия вкладки.</p>
+    </section>
+
+    <section>
       <h2>Документ</h2>
       <label for="file">Файл</label>
       <input id="file" type="file" accept=".pdf,.xlsx,.xls,.jpg,.jpeg,.webp">
@@ -122,6 +132,22 @@
   </main>
   <script>
     const errorBox = document.getElementById("error");
+    const tokenInput = document.getElementById("token");
+    tokenInput.value = sessionStorage.getItem("appToken") || "";
+
+    function authHeaders(headers) {
+      const token = tokenInput.value.trim();
+      const result = Object.assign({}, headers);
+      if (token) {
+        result.Authorization = "Bearer " + token;
+      }
+      return result;
+    }
+
+    document.getElementById("save-token").addEventListener("click", () => {
+      sessionStorage.setItem("appToken", tokenInput.value.trim());
+      loadSchemas(schemaSelect.value || "invoice");
+    });
     const schemaSelect = document.getElementById("schema");
     const resultBox = document.getElementById("result");
     let schemas = [];
@@ -166,7 +192,7 @@
     }
 
     async function loadSchemas(preferredId) {
-      const response = await fetch("/api/schemas");
+      const response = await fetch("/api/schemas", { headers: authHeaders() });
       if (!response.ok) {
         showError(await readError(response));
         return;
@@ -181,7 +207,7 @@
       const buttons = document.querySelectorAll("button");
       buttons.forEach((button) => { button.disabled = true; });
       try {
-        const response = await fetch("/api/recognize", { method: "POST", body: form });
+        const response = await fetch("/api/recognize", { method: "POST", body: form, headers: authHeaders() });
         if (!response.ok) {
           resultBox.textContent = "Здесь появится JSON.";
           showError(await readError(response));
@@ -235,7 +261,7 @@
       const prompt = document.getElementById("schema-prompt").value.trim();
       const response = await fetch("/api/schemas", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ name, prompt }),
       });
       if (!response.ok) {
@@ -252,7 +278,10 @@
         return;
       }
       showError("");
-      const response = await fetch("/api/schemas/" + encodeURIComponent(current.id), { method: "DELETE" });
+      const response = await fetch("/api/schemas/" + encodeURIComponent(current.id), {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
       if (!response.ok) {
         showError(await readError(response));
         return;

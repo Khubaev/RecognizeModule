@@ -1,6 +1,7 @@
 """Асинхронный адаптер GigaChat: загрузка файла и запрос чата с вложением."""
 
 import asyncio
+import logging
 
 from gigachat import GigaChat
 from gigachat.exceptions import BadRequestError, GigaChatException, UnprocessableEntityError
@@ -10,6 +11,8 @@ from gigachat.models.response_format import JsonSchemaResponseFormat
 from app.domain.entities import DocumentFormat, PreparedDocument, RecognizerOutput
 from app.domain.exceptions import RecognitionFailedError
 from app.infrastructure.config import AppSettings, resolve_path
+
+logger = logging.getLogger(__name__)
 
 
 class GigaChatRecognizer:
@@ -41,7 +44,8 @@ class GigaChatRecognizer:
                 uploaded_id = uploaded.id_
                 response = await self._complete(client, prompt, uploaded_id, json_schema, model)
             except GigaChatException as exc:
-                raise RecognitionFailedError(f"GigaChat не принял документ: {exc}") from exc
+                logger.exception("GigaChat request failed")
+                raise RecognitionFailedError("Сервис распознавания временно недоступен.") from exc
             finally:
                 if uploaded_id is not None:
                     await self._delete_uploaded(client, uploaded_id)
@@ -88,11 +92,14 @@ class GigaChatRecognizer:
         return chat
 
     async def _delete_uploaded(self, client: GigaChat, file_id: str) -> None:
-        """Удаляет вложение. Ошибка очистки не заменяет результат распознавания."""
-        try:
-            await client.adelete_file(file_id)
-        except GigaChatException:
-            return
+        """Удаляет вложение. Повтор нужен, чтобы файл не остался у провайдера."""
+        for _attempt in range(2):
+            try:
+                await client.adelete_file(file_id)
+                return
+            except GigaChatException:
+                logger.warning("GigaChat file delete failed")
+        logger.error("GigaChat file remained after delete retries")
 
     async def aclose(self) -> None:
         """Закрывает HTTP-клиент, если распознавание уже открывало соединение."""
@@ -106,10 +113,11 @@ class GigaChatRecognizer:
             return self._client
         credentials = self._settings.gigachat_credentials.strip()
         if not credentials:
-            raise RecognitionFailedError("Не задан GIGACHAT_CREDENTIALS в окружении или .env.")
+            raise RecognitionFailedError("Не задан ключ GigaChat.")
         ca_bundle = resolve_path(self._settings.gigachat_ca_bundle)
         if not ca_bundle.is_file():
-            raise RecognitionFailedError(f"Не найден CA-сертификат: {ca_bundle}")
+            logger.error("CA bundle is missing")
+            raise RecognitionFailedError("Не найден сертификат для соединения с GigaChat.")
         async with self._lock:
             if self._client is None:
                 self._client = GigaChat(

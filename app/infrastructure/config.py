@@ -20,6 +20,11 @@ class AppSettings(BaseSettings):
     gigachat_max_concurrency: int = 2
     max_upload_bytes: int = 15 * 1024 * 1024
     schemas_path: str = "data/schemas.json"
+    app_token: str = ""
+    allow_remote: bool = False
+    recognize_per_minute: int = 8
+    api_per_minute: int = 30
+    rate_window_seconds: float = 60.0
 
     model_config = SettingsConfigDict(
         env_file=str(_PROJECT_ROOT / ".env"),

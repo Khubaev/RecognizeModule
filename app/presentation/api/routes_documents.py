@@ -48,5 +48,4 @@ async def recognize_document(
         "schema_name": result.schema_name,
         "model": result.model,
         "data": result.data,
-        "raw_text": result.raw_text,
     }

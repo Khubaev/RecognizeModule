@@ -6,9 +6,14 @@ from pathlib import Path
 from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
 from PIL import Image, UnidentifiedImageError
+from PIL.Image import DecompressionBombError
 
 from app.domain.entities import DocumentFormat, PreparedDocument, SourceDocument
 from app.domain.exceptions import InvalidDocumentError
+
+Image.MAX_IMAGE_PIXELS = 20_000_000
+_MAX_EXCEL_SHEETS = 20
+_MAX_EXCEL_ROWS = 5_000
 
 
 class FileDocumentPreparer:
@@ -31,7 +36,7 @@ class FileDocumentPreparer:
                 image = image.convert("RGB")
             buffer = BytesIO()
             image.save(buffer, format="JPEG", quality=90)
-        except (UnidentifiedImageError, OSError) as exc:
+        except (UnidentifiedImageError, DecompressionBombError, OSError) as exc:
             raise InvalidDocumentError("Не удалось прочитать WebP-изображение.") from exc
         return PreparedDocument(
             filename=f"{Path(document.filename).stem}.jpg",
@@ -48,9 +53,15 @@ class FileDocumentPreparer:
             ) from exc
         lines: list[str] = []
         try:
+            if len(workbook.worksheets) > _MAX_EXCEL_SHEETS:
+                raise InvalidDocumentError("В книге Excel слишком много листов.")
             for sheet in workbook.worksheets:
                 lines.append(f"# Лист: {sheet.title}")
+                row_count = 0
                 for row in sheet.iter_rows(values_only=True):
+                    row_count += 1
+                    if row_count > _MAX_EXCEL_ROWS:
+                        raise InvalidDocumentError("В таблице Excel слишком много строк.")
                     cells = ["" if value is None else str(value) for value in row]
                     if any(cell.strip() for cell in cells):
                         lines.append(" | ".join(cells))

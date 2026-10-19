@@ -5,6 +5,7 @@ from pathlib import Path
 
 from app.application.parse_model_json import parse_model_json
 from app.application.ports import DocumentPreparer, DocumentRecognizer, SchemaRepository
+from app.domain.content import assert_content_matches
 from app.domain.entities import ExtractionSchema, RecognitionResult, SourceDocument
 from app.domain.entities import detect_format
 from app.domain.exceptions import InvalidDocumentError, SchemaSelectionError
@@ -61,7 +62,9 @@ class RecognizeDocument:
         if len(content) > self._max_upload_bytes:
             limit_mb = self._max_upload_bytes / (1024 * 1024)
             raise InvalidDocumentError(f"Файл больше допустимого размера {limit_mb:.0f} МБ.")
-        return SourceDocument(filename=safe_name, content=content, format=detect_format(safe_name))
+        document_format = detect_format(safe_name)
+        assert_content_matches(document_format, content)
+        return SourceDocument(filename=safe_name, content=content, format=document_format)
 
     def _schema(self, schema_id: str | None, prompt: str | None) -> ExtractionSchema:
         prompt_text = (prompt or "").strip()
